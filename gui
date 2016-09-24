@@ -1,0 +1,171 @@
+#!/usr/bin/python3.4
+from tkinter import *
+import time
+import configparser
+
+config = configparser.RawConfigParser()
+config.read("config.cfg")
+
+def load():
+	file = file_path.get()
+	print(file)
+	status.config(text="LOADED")
+
+def main():
+	def ok():
+		if iscal == 0  and checkcal.get() == 0:
+			print("needs to be calibrated")
+		else:	
+			print("Ok", checkshow)
+			config.set("general","showint",checkshow.get()) 
+			try:
+				config.set("general","xlen",float(xentry.get()))
+				config.set("general","ylen",float(yentry.get()))
+			except:
+				error = Tk()
+				error.title("Error")
+				error.geometry("150x150")
+				errorlbl = Label(
+						master=error,
+						font=("Arial", 15),
+						text="Geben Sie die Länge der X- und Y-Achse in Dezimalzahlen ein!",
+						wraplength=130
+						)
+				errorlbl.pack()
+				error.mainloop()
+			with open("config.cfg", "wt") as configfile:
+				config.write(configfile)
+			info.destroy()
+			read()
+
+	def end():
+		print("end")
+		info.destroy()
+	iscal = config.getint("general", "iscal")
+	showint = config.getint("general", "showint")
+	if showint == 0:
+		info = Tk()
+		info.title("Erster Programmstart")
+		info.geometry("300x400")
+		checkshow=IntVar()		
+		checkcal=IntVar()
+		
+
+		ilabel = Label(
+				master=info,
+				font=("Arial", 15),
+				text="Sie starten das Programm zum ersten Mal. Bitte geben Sie die Länge der X- und Y-Achse in cm ein.",
+				padx=10,
+				pady=10,
+				wraplength=280
+				)
+		xlabel=Label(
+				master=info,
+				font=("Arial", 15),
+				text="X-Achse [cm]:",
+				padx=10
+				)
+		xentry=Entry(
+				master=info,
+				font=("Arial", 15),
+				width=10
+				)
+		ylabel=Label(
+				master=info,
+				font=("Arial", 15),
+				text="Y-Achse [cm]:",
+				padx=10
+				)
+		yentry=Entry(
+				master=info,
+				font=("Arial", 15),
+				width=10
+				)
+		calibrate=Checkbutton(
+					master=info,
+					font=("Arial", 15),
+					text="Fräse kalibrieren",
+					padx=10,
+					onvalue=1,
+					variable=checkcal
+					)
+		calibrate.select()
+		show=Checkbutton(
+				master=info,
+				font=("Arial", 15),
+				text="Nicht erneut anzeigen",
+				padx=10,
+				onvalue=1,
+				variable=checkshow
+				)
+		show.select()
+		ok=Button(
+			master=info,
+			font=("Arial", 15),
+			text="  Weiter  ",
+			command=ok
+			)
+		end=Button(
+			master=info,
+			font=("Arial", 15),
+			text="Abbrechen",
+			command=end
+			)
+		ilabel.place(x=0,y=0)
+		xlabel.place(x=0,y=140)
+		xentry.place(x=140,y=140)
+		ylabel.place(x=0,y=180)
+		yentry.place(x=140,y=180)
+		calibrate.place(x=0,y=220)
+		show.place(x=0,y=250)
+		ok.place(x=35,y=300)
+		end.place(x=150,y=300) 
+		
+	
+		info.mainloop()
+	elif showint == 1:
+		read()
+	
+def read():
+	root = Tk()
+	root.title("Fräse")
+	root.geometry("700x700")
+	global file_path
+	file_path=StringVar()	
+
+	da = Label	(	
+			master=root,
+			text="Dateipfad:",
+			font=("Arial", 15)
+			)
+	file_path = Entry(
+			master = root,
+			font=("Arial", 15),
+			textvariable=file_path
+			)
+	dl = Button	(
+			master=root,
+			text="Datei laden",
+			font=("Arial", 15),
+			command=load
+			)
+	global status
+	status = Label	(
+			master=root,
+			text="Bitte Dateipfad eingeben",
+			font=("Arial", 15)
+			)
+	start = Button(
+			master=root,
+			text="Fräse starten",
+			font=("Arial", 15),
+			
+			)
+	da.place(x=0,y=10)
+	file_path.place(x=100, y=10)
+	dl.place(x=350,y=8)
+	status.pack(side = BOTTOM, anchor=E)
+	start.place(x=350,y=50)	
+	root.mainloop()
+if __name__=="__main__":
+	main()

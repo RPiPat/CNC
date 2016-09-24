@@ -1,0 +1,752 @@
+#! /usr/share/python3.4
+
+import RPi.GPIO as gpio
+import time
+import re
+import tkinter
+from svgpathtools import svg2paths, wsvg, svg2paths2
+import math
+import configparser
+
+gpio.setmode(gpio.BOARD)
+gpio.setup(18, gpio.OUT)					#motor 3, left
+gpio.setup(33, gpio.OUT)					#motor 3, right
+gpio.setup(35, gpio.OUT)					#motors 1 and 2, forwards
+gpio.setup(37, gpio.OUT)					#motors 1 and 2, backwards
+gpio.setup(29, gpio.OUT)					#servo
+gpio.setup(32, gpio.IN, pull_up_down = gpio.PUD_DOWN)		#switch1, forwards
+gpio.setup(36, gpio.IN, pull_up_down = gpio.PUD_DOWN)		#switch 2, backwards
+gpio.setup(38, gpio.IN, pull_up_down = gpio.PUD_DOWN)		#switch 3, left
+gpio.setup(40, gpio.IN, pull_up_down = gpio.PUD_DOWN)		#switch 4, right
+gpio.setup(22, gpio.OUT)					#milling motor, on/off
+s = gpio.PWM(29, 50)						#servo pwm
+right = gpio.PWM(33, 100)					#motor 3 pwm right
+left = gpio.PWM(18, 100)					#motor 3 pwm left
+backward = gpio.PWM(37, 100)					#motors 1 and 2 pwm backwards
+forward = gpio.PWM(35, 100)					#motors 1 and 2 pwm forwards
+
+config = configparser.RawConfigParser()
+config.read("config.cfg")
+
+lx = config.getfloat("general", "xlen")								#lenght of the x-axis, in cm, given by user
+ly = config.getfloat("general", "ylen")								#lenght of the y-axis, ""
+
+def calibrate():						#calibration
+	gpio.output(33, 1)
+	gpio.wait_for_edge(40, gpio.RISING)			
+	gpio.output(33, 0)
+	startx = time.time()
+	gpio.output(18, 1)
+	gpio.wait_for_edge(38, gpio.RISING)
+	gpio.output(18, 0)
+	endx = time.time()
+	timex = endx - startx
+	global xunit
+	xunit = timex/(lx*10)					#xunit determines the time needed to move one coordinate unit on the x axis
+	global currx
+	currx = 0
+	gpio.output(35, 1)
+	gpio.wait_for_edge(32, gpio.RISING)			
+	gpio.output(35, 0)	
+	starty = time.time()
+	gpio.output(37, 1)
+	gpio.wait_for_edge(36, gpio.RISING)
+	gpio.output(37, 0)
+	endy = time.time()
+	timey = endy - starty
+	global yunit		
+	yunit = timey/(ly*10)					#same for y axis
+	print(yunit)
+	global curry
+	curry = 0
+
+def load():
+	global file
+	file = file_path.get()
+	print(file)
+	status.config(text="LOADED")
+
+def main():
+	iscal = config.getint("general", "iscal")
+	showint = config.getint("general", "showint")
+	if showint == 0:
+		info = Tk()
+		info.title("Erster Programmstart")
+		info.geometry("300x400")
+		checkshow=IntVar()		
+		checkcal=IntVar()
+		
+
+		ilabel = Label(
+				master=info,
+				font=("Arial", 15),
+				text="Sie starten das Programm zum ersten Mal. Bitte geben Sie die Länge der X- und Y-Achse in cm ein.",
+				padx=10,
+				pady=10,
+				wraplength=280
+				)
+		xlabel=Label(
+				master=info,
+				font=("Arial", 15),
+				text="X-Achse [cm]:",
+				padx=10
+				)
+		xentry=Entry(
+				master=info,
+				font=("Arial", 15),
+				width=10
+				)
+		ylabel=Label(
+				master=info,
+				font=("Arial", 15),
+				text="Y-Achse [cm]:",
+				padx=10
+				)
+		yentry=Entry(
+				master=info,
+				font=("Arial", 15),
+				width=10
+				)
+		calibrate=Checkbutton(
+					master=info,
+					font=("Arial", 15),
+					text="Fräse kalibrieren",
+					padx=10,
+					onvalue=1,
+					variable=checkcal
+					)
+		calibrate.select()
+		show=Checkbutton(
+				master=info,
+				font=("Arial", 15),
+				text="Nicht erneut anzeigen",
+				padx=10,
+				onvalue=1,
+				variable=checkshow
+				)
+		show.select()
+		ok=Button(
+			master=info,
+			font=("Arial", 15),
+			text="  Weiter  ",
+			command=ok
+			)
+		end=Button(
+			master=info,
+			font=("Arial", 15),
+			text="Abbrechen",
+			command=end
+			)
+		ilabel.place(x=0,y=0)
+		xlabel.place(x=0,y=140)
+		xentry.place(x=140,y=140)
+		ylabel.place(x=0,y=180)
+		yentry.place(x=140,y=180)
+		calibrate.place(x=0,y=220)
+		show.place(x=0,y=250)
+		ok.place(x=35,y=300)
+		end.place(x=150,y=300) 
+		
+	
+		info.mainloop()
+	elif showint == 1:
+		window()
+		
+	def calc():
+		global xunit, yunit, path_attr, listx, listy, listw, n, c, currx, curry, file
+		xunit = 0.025773
+		yunit = 0.024615
+		currx = 0
+		curry = 0
+		try:
+			#file = input("Please enter file name of svg: " )
+			path, attr = svg2paths(file)
+			paths, attributes, svg_attributes = svg2paths2(file)
+			strpath= str(path)
+			path_attr = attributes[0]
+			listx = re.findall("\d+[\.]?\d*", strpath)
+			counter = 0
+			listy = []
+			listw = re.findall(r'L|A', strpath) 
+			arcs = 0
+		except:
+			print("file not found")
+			gpio.cleanup()
+			exit()
+		for arcs in range(listw.count("A")):
+			listx.remove("0.0")
+			arcs += 1
+		length = int(len(listx)/2)
+		for counter in range(length):
+			listy.append(listx.pop(counter+1))
+			counter = counter + 1 
+		n = 0			#number of element
+		c = 0			#counter of coordinates
+		read()
+
+			def ok():
+		if iscal == 0  and checkcal.get() == 0:
+			print("needs to be calibrated")
+		else:	
+			print("Ok", checkshow)
+			config.set("general","showint",checkshow.get()) 
+			try:
+				config.set("general","xlen",float(xentry.get()))
+				config.set("general","ylen",float(yentry.get()))
+			except:
+				error1 = Tk()
+				error1.title("Error")
+				error1.geometry("150x150")
+				errorlbl = Label(
+						master=error,
+						font=("Arial", 15),
+						text="Geben Sie die Länge der X- und Y-Achse in Dezimalzahlen ein!",
+						wraplength=130
+						)
+				errorlbl.pack()
+				error1.mainloop()
+			with open("config.cfg", "wt") as configfile:
+				config.write(configfile)
+			info.destroy()
+			window()
+	def end():
+		print("end")
+		info.destroy()
+		
+def window():
+	root = Tk()
+	root.title("Fräse")
+	root.geometry("700x700")
+	global file_path
+	file_path=StringVar()	
+
+	da = Label	(	
+			master=root,
+			text="Dateipfad:",
+			font=("Arial", 15)
+			)
+	file_path = Entry(
+			master = root,
+			font=("Arial", 15),
+			textvariable=file_path
+			)
+	dl = Button	(
+			master=root,
+			text="Datei laden",
+			font=("Arial", 15),
+			command=load
+			)
+	global status
+	status = Label	(
+			master=root,
+			text="Bitte Dateipfad eingeben",
+			font=("Arial", 15)
+			)
+	start = Button(
+			master=root,
+			text="Fräse starten",
+			font=("Arial", 15),
+			command=read()
+			)
+	da.place(x=0,y=10)
+	file_path.place(x=100, y=10)
+	dl.place(x=350,y=8)
+	status.pack(side = BOTTOM, anchor=E)
+	start.place(x=350,y=50)	
+	root.mainloop()
+		
+def read():								#coordinates are read into x/y list
+	global startx, starty, rad, rot, la, sweep, endx, endy, n, c, rx, ry, cx, cy, path_attr
+	
+	if n >= int(len(listw)):
+		print("Done")
+		gpio.cleanup()
+		exit()
+	else:
+		pass
+	if listw[n] == "L":						#searches for line element
+		startx = float(listx[c])
+		starty = float(listy[c])
+		endx = float(listx[c+1])
+		endy = float(listy[c+1])
+
+		n += 1
+		c += 2
+		line()
+
+	elif listw[n] == "A":						#searches for arc element
+		startx = float(listx[c])	
+		starty = float(listy[c])
+		rx = float(listx[c+1])
+		ry = float(listy[c+1])	
+		la = listx[c+2]
+		sweep = listy[c+2]
+		endx = float(listx[c+3])
+		endy = float(listy[c+3])
+		cx = float(path_attr["sodipodi:cx"])
+		cy = float(path_attr["sodipodi:cy"])
+		n += 1
+		c += 4
+		
+		arc()
+	else:
+		print("Error!")
+		gpio.cleanup()
+		exit()
+def line():	
+	global currx, curry, startx, starty, endx, endy
+
+	diffx = currx - startx
+	diffy = curry - starty	
+	
+	if diffx < 0:
+		movex = math.fabs(diffx)
+		gpio.output(33, 1)
+		time.sleep(movex*xunit)
+		gpio.output(33, 0)
+	elif diffx > 0:
+		movex = diffx
+		gpio.output(18, 1)
+		time.sleep(movex*xunit)
+		gpio.output(18, 0)
+	elif diffx == 0:
+		print("x is ready!")
+	else:
+		print("Error!")
+		gpio.cleanup()
+		exit()
+	if diffy < 0:
+		movey = math.fabs(diffy)
+		gpio.output(35, 1)
+		time.sleep(movey*yunit)
+		gpio.output(35, 0)
+	
+	elif diffy > 0:
+		movey = diffy
+		gpio.output(37, 1)
+		time.sleep(diffy*yunit)
+		gpio.output(37, 0)
+		
+	elif diffy == 0:
+		print("y is ready!")
+		
+	else:
+		print("Error!")
+		gpio.cleanup()
+		exit()
+		
+	currx = startx
+	curry = starty
+	
+
+	gpio.output(22, 1)
+	s.start(10.3)
+	s.ChangeDutyCycle(11.5)
+	
+	diffx = currx - endx
+	diffy = curry - endy
+
+	if diffx == 0 or diffy == 0:	
+		
+		if diffx < 0:
+			movex = math.fabs(diffx)
+			gpio.output(33, 1)
+			time.sleep(movex*xunit)
+			gpio.output(33, 0)
+		elif diffx > 0:
+			movex = diffx
+			gpio.output(18, 1)
+			time.sleep(movex*xunit)
+			gpio.output(18, 0)
+		elif diffx == 0:
+			print("x is ready!")
+		else:
+			print("Error!")
+			gpio.cleanup()
+			exit()
+		
+		if diffy < 0:
+			movey = math.fabs(diffy)
+			gpio.output(35, 1)
+			time.sleep(movey*yunit)
+			gpio.output(35, 0)
+		elif diffy > 0:
+			movey = diffy
+			gpio.output(37, 1)
+			time.sleep(movey*yunit)
+			gpio.output(37, 0)
+		elif diffy == 0:
+			print("y is ready!")
+		else:
+			print("Error!")
+			gpio.cleanup()
+			exit()
+	elif not diffx == 0 and not diffy == 0:
+		#vx = 100
+		#vy = 100/diffx*diffy
+		#t = diffx*xunit
+		right.start(0)
+		left.start(0)
+		backward.start(0)
+		forward.start(0)
+		if diffx > 0 and diffy > 0:
+			if diffx > diffy:
+				right.ChangeDutyCycle(100)
+				backward.ChangeDutyCycle(100/diffx*diffy)
+				time.sleep(diffx*xunit)
+				right.ChangeDutyCycle(0)
+				backward.ChangeDutyCycle(0)
+				read()
+			elif diffy > diffx:
+				backward.ChangeDutyCycle(100)
+				right.ChangeDutyCycle(100/diffy*diffx)
+				time.sleep(diffy*yunit)
+				backward.ChangeDutyCycle(0)
+				right.ChangeDutyCycle(0)
+				read()
+			elif diffx == math.fabs(diffy):
+				forward.ChangeDutyCycle(100)
+				left.ChangeDutyCycle(100)
+				time.sleep(diffx*xunit)
+			else:
+				print("LineError")
+				gpio.cleanup()
+				exit()
+		elif diffx > 0 and diffy < 0:
+			if diffx > math.fabs(diffy):
+				left.ChangeDutyCycle(100)
+				forward.ChangeDutyCycle(100/diffx*math.fabs(diffy))
+				time.sleep(diffx*xunit)
+				left.ChangeDutyCycle(0)
+				forward.ChangeDutyCycle(0)
+				read()
+			elif math.fabs(diffy) > diffx:
+				forward.ChangeDutyCycle(100)
+				left.ChangeDutyCycle(100/math.fabs(diffy)*diffx)
+				time.sleep(math.fabs(diffy)*yunit)
+				forward.ChangeDutyCycle(0)
+				left.ChangeDutyCycle(0)
+				read()
+			elif diffx == math.fabs(diffy):
+				forward.ChangeDutyCycle(100)
+				left.ChangeDutyCycle(100)
+				time.sleep(diffx*xunit)
+				forward.ChangeDutyCycle(0)
+				left.ChangeDutyCycle(0)
+				read()
+			else:
+				print("LineError")
+				gpio.cleanup()
+				exit()
+		elif diffx < 0 and diffy > 0:
+			if diffy > math.fabs(diffx):
+				backward.ChangeDutyCycle(100)
+				left.ChangeDutyCycle(100/diffy*math.fabs(diffx))
+				time.sleep(diffy*yunit)
+				backward.ChangeDutyCycle(0)
+				left.ChangeDutyCycle(0)
+				read()
+			elif diffy < math.fabs(diffx):
+				left.ChangeDutyCycle(100)
+				backward.ChangeDutyCycle(100/math.fabs(diffx)*diffy)
+				time.sleep(math.fabs(diffx)*xunit)
+				backward.ChangeDutyCycle(0)
+				left.ChangeDutyCycle(0)
+				read()
+			elif diffy == math.fabs(diffx):
+				left.ChangeDutyCycle(100)
+				backward.ChangeDutyCycle(100)
+				time.sleep(diffy*yunit)
+				left.ChangeDutyCycle(0)
+				backward.ChangeDutyCycle(0)
+				read()
+			else:
+				print("LineError")
+				gpio.cleanup()
+				exit()
+		elif diffx < 0 and diffy < 0:
+			if math.fabs(diffy) > math.fabs(diffx):
+				forward.ChangeDutyCycle(100)
+				right.ChangeDutyCycle(100/diffy*diffx)		#math.fabs not used, cause (-)*(-) = +-
+				time.sleep(math.fabs(diffy)*yunit)
+				forward.ChangeDutyCycle(0)
+				right.ChangeDutyCycle(0)
+				read()
+			elif math.fabs(diffy) < math.fabs(diffx):
+				right.ChangeDutyCycle(100)
+				forward.ChangeDutyCycle	(100/diffx*diffy)
+				time.sleep(math.fabs(diffx)*xunit)
+				right.ChangeDutyCycle(0)
+				forward.ChangeDutyCycle(0)
+				read()
+			elif diffy == diffx:
+				right.ChangeDutyCycle(100)
+				forward.ChangeDutyCycle(100)
+				time.sleep(math.fabs(diffx)*xunit)
+				right.ChangeDutyCycle(0)
+				forward.ChangeDutyCycle(0)
+				read()
+		else:
+			print("Lineerror")
+			gpio.cleanup()
+			exit()
+	else:
+		print("der error den ich gesucht hab")	
+	currx = endx
+	curry = endy
+	
+	s.ChangeDutyCycle(10.3)
+	gpio.output(22, 0)
+	read()
+		
+	 
+def arc():
+	global cx, cy, rx, ry, startx, starty, endx, endy, currx, curry
+	run = 0
+	listcox = []
+	listcoy = []
+	if startx > endx:
+		for run in range(100):
+			cox = startx-((startx-endx)/100*run)
+			listcox.append(cox)
+			sqrt = math.sqrt((4*(rx**2)*(ry**2)-4*(ry**2)*(cx**2)+8*(ry**2)*cx*listcox[run]-4*(ry**2)*(listcox[run]**2))/(4*(rx**2)))
+			if starty >= cy and endy >= cy:
+				listcoy.append(cy+sqrt)
+			elif starty <= cy and endy <= cy:
+				listcoy.append(cy-sqrt)
+			else:
+				print("Error while calculating y")
+				gpio.cleanup()
+				exit()
+			run += 1
+	elif endx > startx:
+		for run in range (100):
+			cox = startx-((startx-endx)/100*run)
+			listcox.append(cox)
+			if starty >= cy and endy >= cy:
+				listcoy.append(cy+sqrt)
+			elif starty <= cy and endy <= cy:
+				listcoy.append(cy-sqrt)
+			else:
+				print("Error while calculating y")
+				gpio.cleanup()
+				exit()
+			run += 1
+	
+
+	listcox.pop()
+	listcox.append(endx)
+	listcoy.pop()
+	listcoy.append(endy)
+	listcox.pop(0)
+	listcoy.pop(0)
+	run = 0
+	diffx = currx - startx
+	diffy = curry - starty
+	
+	if diffx < 0:
+		movex = math.fabs(diffx)
+		gpio.output(33, 1)
+		time.sleep(movex*xunit)
+		gpio.output(33, 0)
+	elif diffx > 0:
+		movex = diffx
+		gpio.output(18, 1)
+		time.sleep(movex*xunit)
+		gpio.output(18, 0)
+	elif diffx == 0:
+		print("x is ready!")
+	else:
+		print("Error!")
+		gpio.cleanup()
+		exit()
+	if diffy < 0:
+		movey = math.fabs(diffy)
+		gpio.output(35, 1)
+		time.sleep(movey*yunit)
+		gpio.output(35, 0)
+	
+	elif diffy > 0:
+		movey = diffy
+		gpio.output(37, 1)
+		time.sleep(diffy*yunit)
+		gpio.output(37, 0)
+		
+	elif diffy == 0:
+		print("y is ready!")
+		
+	else:
+		print("Error!")
+		gpio.cleanup()
+		exit()
+	
+	currx = startx
+	curry = starty
+	
+	gpio.output(22, 1)
+	s.ChangeDutyCycle(11.5)
+	
+	for run in range(100):
+		diffx = currx - listcox[run]
+		diffy = curry - listcoy[run]
+
+		if diffx == 0 or diffy == 0:	
+		
+			if diffx < 0:
+				movex = math.fabs(diffx)
+				gpio.output(33, 1)
+				time.sleep(movex*xunit)
+				gpio.output(33, 0)
+			elif diffx > 0:
+				movex = diffx
+				gpio.output(18, 1)
+				time.sleep(movex*xunit)
+				gpio.output(18, 0)
+			elif diffx == 0:
+				print("x is ready!")
+			else:
+				print("Error!")
+				gpio.cleanup()
+				exit()
+			
+			if diffy < 0:
+				movey = math.fabs(diffy)
+				gpio.output(35, 1)
+				time.sleep(movey*yunit)
+				gpio.output(35, 0)
+			elif diffy > 0:
+				movey = diffy
+				gpio.output(37, 1)
+				time.sleep(movey*yunit)
+				gpio.output(37, 0)
+			elif diffy == 0:
+				print("y is ready!")
+			else:
+				print("Error!")
+				gpio.cleanup()
+				exit()
+		elif not diffx == 0 and not diffy == 0:
+			#vx = 100
+			#vy = 100/diffx*diffy
+			#t = diffx*xunit
+			right.start(0)
+			left.start(0)
+			backward.start(0)
+			forward.start(0)
+			if diffx > 0 and diffy > 0:
+				if diffx > diffy:
+					left.ChangeDutyCycle(100)
+					backward.ChangeDutyCycle(100/diffx*diffy)
+					time.sleep(diffx*xunit)
+					left.ChangeDutyCycle(0)
+					backward.ChangeDutyCycle(0)
+					read()
+				elif diffy > diffx:
+					backward.ChangeDutyCycle(100)
+					left.ChangeDutyCycle(100/diffy*diffx)
+					time.sleep(diffy*yunit)
+					backward.ChangeDutyCycle(0)
+					left.ChangeDutyCycle(0)
+					read()
+				elif diffx == math.fabs(diffy):
+					forward.ChangeDutyCycle(100)
+					left.ChangeDutyCycle(100)
+					time.sleep(diffx*xunit)
+					forward.ChangeDutyCycle(0)
+					left.ChangeDutyCycle(0)
+				else:
+					print("ArcError")
+					gpio.cleanup()
+					exit()
+			elif diffx > 0 and diffy < 0:
+				if diffx > math.fabs(diffy):
+					left.ChangeDutyCycle(100)
+					forward.ChangeDutyCycle(100/diffx*math.fabs(diffy))
+					time.sleep(diffx*xunit)
+					left.ChangeDutyCycle(0)
+					forward.ChangeDutyCycle(0)
+					read()
+				elif math.fabs(diffy) > diffx:
+					forward.ChangeDutyCycle(100)
+					left.ChangeDutyCycle(100/math.fabs(diffy)*diffx)
+					time.sleep(math.fabs(diffy)*yunit)
+					forward.ChangeDutyCycle(0)
+					left.ChangeDutyCycle(0)
+					read()
+				elif diffx == math.fabs(diffy):
+					forward.ChangeDutyCycle(100)
+					left.ChangeDutyCycle(100)
+					time.sleep(diffx*xunit)
+					forward.ChangeDutyCycle(0)
+					left.ChangeDutyCycle(0)
+					read()
+				else:
+					print("ArcError")
+					gpio.cleanup()
+					exit()
+			elif diffx < 0 and diffy > 0:
+				if diffy > math.fabs(diffx):
+					backward.ChangeDutyCycle(100)
+					right.ChangeDutyCycle(100/diffy*math.fabs(diffx))
+					time.sleep(diffy*yunit)
+					backward.ChangeDutyCycle(0)
+					right.ChangeDutyCycle(0)
+					read()
+				elif diffy < math.fabs(diffx):
+					right.ChangeDutyCycle(100)
+					backward.ChangeDutyCycle(100/math.fabs(diffx)*diffy)
+					time.sleep(math.fabs(diffx)*xunit)
+					backward.ChangeDutyCycle(0)
+					right.ChangeDutyCycle(0)
+					read()
+				elif diffy == math.fabs(diffx):
+					right.ChangeDutyCycle(100)
+					backward.ChangeDutyCycle(100)
+					time.sleep(diffy*yunit)
+					right.ChangeDutyCycle(0)
+					backward.ChangeDutyCycle(0)
+					read()
+				else:
+					print("ArcError")
+					gpio.cleanup()
+					exit()
+			elif diffx < 0 and diffy < 0:
+				if math.fabs(diffy) > math.fabs(diffx):
+					forward.ChangeDutyCycle(100)
+					right.ChangeDutyCycle(100/diffy*diffx)		#math.fabs not used, cause (-)*(-) = +-
+					time.sleep(math.fabs(diffy)*yunit)
+					forward.ChangeDutyCycle(0)
+					right.ChangeDutyCycle(0)
+					read()
+				elif math.fabs(diffy) < math.fabs(diffx):
+					right.ChangeDutyCycle(100)
+					forward.ChangeDutyCycle	(100/diffx*diffy)
+					time.sleep(math.fabs(diffx)*xunit)
+					right.ChangeDutyCycle(0)
+					forward.ChangeDutyCycle(0)
+					read()
+				elif diffy == diffx:
+					right.ChangeDutyCycle(100)
+					forward.ChangeDutyCycle(100)
+					time.sleep(math.fabs(diffx)*xunit)
+					right.ChangeDutyCycle(0)
+					forward.ChangeDutyCycle(0)
+					read()
+			else:
+				print("ArcError")
+				gpio.cleanup()
+				exit()
+		else:
+			print("ArcError")	
+		run += 1
+	
+	currx = endx
+	curry = endy
+	run = 0
+	currx = endx
+	curry = endy
+	s.ChangeDutyCycle(10.3)
+	gpio.output(22, 0)
+	read()
+if __name__=="__main__":
+	main()
