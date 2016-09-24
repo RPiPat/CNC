@@ -1,4 +1,6 @@
 #!/usr/bin/python3.4
+
+#here I worked out an unfinished version of a gui
 from tkinter import *
 import time
 import configparser
