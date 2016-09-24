@@ -1,5 +1,7 @@
 #! /usr/share/python3.4
 
+#main part wich took pretty long for a pytho-learning dude
+
 import RPi.GPIO as gpio
 import time
 import re
